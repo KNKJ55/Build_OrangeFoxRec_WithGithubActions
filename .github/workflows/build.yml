@@ -1,0 +1,77 @@
+name: Build OFRP Rec 12.1
+on:
+  workflow_dispatch:
+    inputs:
+      SYNC_URL:
+        descripton: 'rec sync repo url (if unsure, just keep default)'
+        required: true
+        default: https://gitlab.com/OrangeFox/sync.git
+      DEVICE_TREE_URL:
+        descripton: 'Device tree repo url'
+        required: true
+      DEVICE_MANUFACTURER:
+        descripton: 'Device manufacturer'
+        required: true
+      DEVICE_CODENAME:
+        descripton: 'Device codename'
+        required: true
+      BUILD_TYPE:
+        descripton: 'Build type (if device is ab part, say bootimage, if device is a-only part, say recoveryimage'
+        required: true
+
+jobs:
+  build:
+      runs-on: ubuntu-22.04
+      steps:
+
+      - name: Free Disk Space
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: true
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: true
+          swap-storage: true
+
+
+      - name: Setting Up Build Environment
+        run: |
+          apt update && apt dist-upgrade -y
+          cd ~
+          sudo apt install git aria2 make automake build-essential bc python2 -y
+          git clone https://gitlab.com/OrangeFox/misc/scripts
+          cd scripts
+          sudo bash setup/android_build_env.sh
+          sed -i 's/cd -/cd ../g' setup/install_android_sdk.sh
+          sudo bash setup/install_android_sdk.sh
+
+      - name: Sync OrangeFox sources and minimal manifest
+        run: |
+          mkdir ~/OrangeFox_sync
+          cd ~/OrangeFox_sync
+          git clone ${{ github.event.inputs.SYNC_URL }}
+          cd ~/OrangeFox_sync/sync/
+          ./orangefox_sync.sh --branch 12.1 --path ~/fox_12.1
+
+      - name: Place device trees
+        run: |
+          cd ~/fox_12.1
+          git clone ${{ github.event.inputs.DEVICE_TREE_URL }} device/${{ github.event.inputs.DEVICE_MANUFACTURER }}/${{ github.event.inputs.DEVICE_CODENAME }}
+
+      - name: Build OFRP
+        run: |
+          cd ~/fox_12.1
+          export ALLOW_MISSING_DEPENDENCIES=true
+          export FOX_BUILD_DEVICE=${{ github.event.inputs.DEVICE_CODENAME }}
+          export LC_ALL="C"
+          source build/envsetup.sh
+          lunch twrp_${{ github.event.inputs.DEVICE_CODENAME }}-eng && mka adbd ${{ github.event.inputs.BUILD_TYPE }}
+
+      - name: Upload Build
+        uses: actions/upload-artifact@v4
+        with:
+          path: ~/fox_12.1/out/target/product/${{ github.event.inputs.DEVICE_CODENAME }}/OrangeFox-unofficial-${{ github.event.inputs.DEVICE_CODENAME }}.img
+
+
